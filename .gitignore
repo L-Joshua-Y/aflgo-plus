@@ -1,0 +1,43 @@
+# Binaries produced by "make".
+afl-analyze
+afl-as
+afl-clang
+afl-clang++
+afl-fuzz
+afl-g++
+afl-gcc
+afl-gotcpu
+afl-showmap
+afl-tmin
+as
+
+# Binaries produced by "make -C llvm_mode"
+afl-clang-fast
+afl-clang-fast++
+afl-llvm-pass.so
+afl-llvm-rt-32.o
+afl-llvm-rt-64.o
+afl-llvm-rt.o
+
+# Binaries in instrument
+aflgo-clang
+aflgo-clang++
+afl-clang-fast
+afl-clang-fast++
+aflgo-pass.so
+aflgo-runtime-32.o
+aflgo-runtime-64.o
+aflgo-runtime.o
+instrument/llvm_tools
+
+# Binaries in afl
+afl-cmin
+afl-plot
+afl-whatsup
+Android.bp
+
+# VS Code
+.vscode
+
+# MacOS
+.DS_Store
