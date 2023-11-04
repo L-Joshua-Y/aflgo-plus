@@ -132,7 +132,7 @@ static void getDebugLoc(const Instruction *I, std::string &Filename,
     Line = oDILoc.getLineNumber();
     Filename = oDILoc.getFilename().str();
 
-    if (filename.empty())
+    if (Filename.empty())
     {
       Line = cDILoc.getLineNumber();
       Filename = cDILoc.getFilename().str();
@@ -155,6 +155,141 @@ static void getDebugLoc(const Instruction *I, std::string &Filename,
     }
   }
 #endif /* LLVM_OLD_DEBUG_API */
+}
+
+static void getDebugLocWithPath(const Instruction *I, std::string &Filepath, unsigned &Line, const std::string &pathPrefix)
+{
+  Filepath = "";
+  Line = 0;
+#ifdef LLVM_OLD_DEBUG_API
+  DebugLoc Loc = I->getDebugLoc();
+  if (!Loc.isUnknown())
+  {
+    DILocation cDILoc(Loc.getAsMDNode(M.getContext()));
+    DILocation oDILoc = cDILoc.getOrigLocation();
+
+    Line = oDILoc.getLineNumber();
+    std::string Directory = oDILoc.getDirectory().str();
+    std::string Filename = oDILoc.getFilename().str();
+
+    if (Filename.empty())
+    {
+      Line = cDILoc.getLineNumber();
+      Directory = cDILoc.getDirectory().str();
+      Filename = cDILoc.getFilename().str();
+    }
+
+    if (!Filename.empty())
+    {
+      SmallString<512> AbsPath;
+      if (Filename.front() == '/')
+      {
+        Filepath = Filename;
+      }
+      else
+      {
+        Filepath = Directory.empty() ? Filename : (Directory + std::string("/") + Filename);
+        auto ec = sys::fs::real_path(Filepath, AbsPath);
+        if (!ec)
+        {
+          Filepath = AbsPath.str().str();
+          if (!pathPrefix.empty() && Filepath.size() >= pathPrefix.size())
+          {
+            if (!Filepath.compare(0, pathPrefix.size(), pathPrefix))
+            {
+              Filepath = Filepath.substr(pathPrefix.size());
+              if (!Filepath.empty() && Filepath.front() == '/')
+                Filepath = Filepath.substr(1);
+            }
+          }
+        }
+      }
+    }
+  }
+#else
+  if (DILocation *Loc = I->getDebugLoc())
+  {
+    Line = Loc->getLine();
+    std::string Directory = Loc->getDirectory().str();
+    std::string Filename = Loc->getFilename().str();
+
+    if (Filename.empty())
+    {
+      DILocation *oDILoc = Loc->getInlinedAt();
+      if (oDILoc)
+      {
+        Line = oDILoc->getLine();
+        Directory = oDILoc->getDirectory().str();
+        Filename = oDILoc->getFilename().str();
+      }
+    }
+
+    if (!Filename.empty())
+    {
+      SmallString<512> AbsPath;
+      if (Filename.front() == '/')
+      {
+        Filepath = Filename;
+      }
+      else
+      {
+        Filepath = Directory.empty() ? Filename : (Directory + std::string("/") + Filename);
+        auto ec = sys::fs::real_path(Filepath, AbsPath);
+        if (!ec)
+        {
+          Filepath = AbsPath.str().str();
+          if (!pathPrefix.empty() && Filepath.size() >= pathPrefix.size())
+          {
+            if (!Filepath.compare(0, pathPrefix.size(), pathPrefix))
+            {
+              Filepath = Filepath.substr(pathPrefix.size());
+              if (!Filepath.empty() && Filepath.front() == '/')
+                Filepath = Filepath.substr(1);
+            }
+          }
+        }
+      }
+    }
+  }
+#endif
+}
+
+static std::string getFuncLocName(const Function *F, const std::string &pathPrefix)
+{
+  std::string funcLoc = "";
+  std::string filename = "";
+  unsigned line = 0;
+  for (auto &BB : *F)
+  {
+    for (auto &I : BB)
+    {
+      getDebugLocWithPath(&I, filename, line, pathPrefix);
+      if (!filename.empty())
+        break;
+    }
+    if (!filename.empty())
+      break;
+  }
+  if (!filename.empty())
+    funcLoc = filename + std::string(":") + itostr(line);
+  else
+  {
+    funcLoc = "0x" + utohexstr(F->getGUID());
+  }
+
+  return funcLoc + std::string(";") + F->getName().str();
+}
+
+static std::string repSepStr(const std::string &prevStr)
+{
+  auto result = prevStr;
+  for (size_t i = 0; i < prevStr.size(); i++)
+  {
+    if (prevStr[i] == '/')
+      result[i] = ')';
+  }
+
+  return result;
 }
 
 static bool isBlacklisted(const Function *F)
@@ -224,7 +359,8 @@ bool AFLCoverage::runOnModule(Module &M)
       while (getline(cf, line))
       {
 
-        std::size_t pos = line.find(",");
+        // std::size_t pos = line.find(",");
+        std::size_t pos = line.find_last_of(",");
         std::string bb_name = line.substr(0, pos);
         int bb_dis = (int)(100.0 * atof(line.substr(pos + 1, line.length()).c_str()));
 
@@ -289,6 +425,13 @@ bool AFLCoverage::runOnModule(Module &M)
       FATAL("Bad value of AFLGO_INST_RATIO (must be between 1 and 100)");
   }
 
+  char *_aflgo_plus_proj_path_prefix = getenv("AFLGO_PLUS_PROJ_ROOT_PATH");
+  std::string _aflgo_plus_proj_path = "";
+  if (_aflgo_plus_proj_path_prefix)
+  {
+    _aflgo_plus_proj_path = _aflgo_plus_proj_path_prefix;
+  }
+
   /* Instrument all the things! */
 
   int inst_blocks = 0;
@@ -297,6 +440,7 @@ bool AFLCoverage::runOnModule(Module &M)
   {
 
     std::ofstream bbtargets_new(OutDirectory + "/BBtargets-new.txt", std::ofstream::out | std::ofstream::app);
+    std::ofstream fcalledges(OutDirectory + "/FCallEdges.txt", std::ofstream::out | std::ofstream::app);
     std::ofstream bbnames(OutDirectory + "/BBnames.txt", std::ofstream::out | std::ofstream::app);
     std::ofstream bbcalls(OutDirectory + "/BBcalls.txt", std::ofstream::out | std::ofstream::app);
     std::ofstream fnames(OutDirectory + "/Fnames.txt", std::ofstream::out | std::ofstream::app);
@@ -315,6 +459,9 @@ bool AFLCoverage::runOnModule(Module &M)
       bool has_BBs = false;
       std::string funcName = F.getName().str();
 
+      std::string funcLocName = getFuncLocName(&F, _aflgo_plus_proj_path);
+      std::string funcPathName = repSepStr(funcLocName);
+
       /* Black list of function names */
       if (isBlacklisted(&F))
       {
@@ -331,16 +478,21 @@ bool AFLCoverage::runOnModule(Module &M)
 
         for (auto &I : BB)
         {
-          getDebugLoc(&I, filename, line);
+          // getDebugLoc(&I, filename, line);
+
+          getDebugLocWithPath(&I, filename, line, _aflgo_plus_proj_path);
 
           /* Don't worry about external libs */
           static const std::string Xlibs("/usr/");
           if (filename.empty() || line == 0 || !filename.compare(0, Xlibs.size(), Xlibs))
             continue;
 
-          std::size_t found = filename.find_last_of("/\\");
-          if (found != std::string::npos)
-            filename = filename.substr(found + 1);
+          // debug
+          // std::cout << filename << ":" << line << std::endl;
+
+          // std::size_t found = filename.find_last_of("/\\");
+          // if (found != std::string::npos)
+          //   filename = filename.substr(found + 1);
 
           if (bb_name.empty())
             bb_name = filename + ":" + std::to_string(line);
@@ -349,9 +501,9 @@ bool AFLCoverage::runOnModule(Module &M)
           {
             for (auto &target : targets)
             {
-              std::size_t found = target.find_last_of("/\\");
-              if (found != std::string::npos)
-                target = target.substr(found + 1);
+              // std::size_t found = target.find_last_of("/\\");
+              // if (found != std::string::npos)
+              //   target = target.substr(found + 1);
 
               std::size_t pos = target.find_last_of(":");
               std::string target_file = target.substr(0, pos);
@@ -369,14 +521,23 @@ bool AFLCoverage::runOnModule(Module &M)
           if (auto *c = dyn_cast<CallInst>(&I))
           {
 
-            std::size_t found = filename.find_last_of("/\\");
-            if (found != std::string::npos)
-              filename = filename.substr(found + 1);
+            // std::size_t found = filename.find_last_of("/\\");
+            // if (found != std::string::npos)
+            //   filename = filename.substr(found + 1);
 
             if (auto *CalledF = c->getCalledFunction())
             {
               if (!isBlacklisted(CalledF))
+              {
                 bbcalls << bb_name << "," << CalledF->getName().str() << "\n";
+                // bbcalls << bb_name << "," << getFuncLocName(CalledF, _aflgo_plus_proj_path) << "\n";
+                fcalledges << funcLocName << "->" << CalledF->getName().str() << "\n";
+                // fcalledges << funcLocName << "->" << getFuncLocName(CalledF, _aflgo_plus_proj_path) << "\n";
+                // if (CalledF->getSubprogram())
+                // {
+                //   fcalledges << funcLocName << "->" << CalledF->getSubprogram()->getFilename().str() << "\n";
+                // }
+              }
             }
           }
         }
@@ -407,7 +568,7 @@ bool AFLCoverage::runOnModule(Module &M)
               Type::getInt8PtrTy(M.getContext()) // uint8_t* bb_name
           };
           FunctionType *FTy = FunctionType::get(Type::getVoidTy(M.getContext()), Args, false);
-          Constant *instrumented = M.getOrInsertFunction("llvm_profiling_call", FTy);
+          FunctionCallee instrumented = M.getOrInsertFunction("llvm_profiling_call", FTy);
           Builder.CreateCall(instrumented, {bbnameVal});
 #endif
         }
@@ -416,7 +577,12 @@ bool AFLCoverage::runOnModule(Module &M)
       if (has_BBs)
       {
         /* Print CFG */
-        std::string cfgFileName = dotfiles + "/cfg." + funcName + ".dot";
+        std::string cfgFileName = "";
+        unsigned cfgFileIndex = 1;
+        do
+        {
+          cfgFileName = dotfiles + "/cfg." + funcPathName + "." + itostr(cfgFileIndex++) + ".dot";
+        } while (sys::fs::exists(cfgFileName));
         std::error_code EC;
         raw_fd_ostream cfgFile(cfgFileName, EC, sys::fs::F_None);
         if (!EC)
@@ -425,8 +591,12 @@ bool AFLCoverage::runOnModule(Module &M)
         }
 
         if (is_target)
-          ftargets << F.getName().str() << "\n";
-        fnames << F.getName().str() << "\n";
+        {
+          // ftargets << F.getName().str() << "\n";
+          ftargets << funcLocName << std::endl;
+        }
+        // fnames << F.getName().str() << "\n";
+        fnames << funcLocName << std::endl;
       }
     }
   }
@@ -478,13 +648,17 @@ bool AFLCoverage::runOnModule(Module &M)
           {
             std::string filename;
             unsigned line;
-            getDebugLoc(&I, filename, line);
+
+            // getDebugLoc(&I, filename, line);
+
+            getDebugLocWithPath(&I, filename, line, _aflgo_plus_proj_path);
 
             if (filename.empty() || line == 0)
               continue;
-            std::size_t found = filename.find_last_of("/\\");
-            if (found != std::string::npos)
-              filename = filename.substr(found + 1);
+
+            // std::size_t found = filename.find_last_of("/\\");
+            // if (found != std::string::npos)
+            //   filename = filename.substr(found + 1);
 
             bb_name = filename + ":" + std::to_string(line);
             break;

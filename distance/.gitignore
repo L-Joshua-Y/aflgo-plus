@@ -5,3 +5,5 @@ distance_calculator/CMakeFiles
 distance_calculator/Makefile
 distance_calculator/cmake_install.cmake
 distance_calculator/CMakeScripts
+distance_calculator/__pycache__
+bitcode_parser/parse_bitcode
