@@ -7,6 +7,7 @@ from calculator_headers import (
     is_path_to_filepath,
     MAX_DISTANCE,
     SMALL_MAX_DISTANCE,
+    INTRA_CALL_DIST_COEF,
 )
 
 graph = nx.DiGraph()
@@ -22,12 +23,10 @@ def find_nodes(name: str):
 def calculate_distance(name: str, bb_dist: dict, outfile):
     global graph
     if name in bb_dist.keys():
-        if bb_dist[name] > SMALL_MAX_DISTANCE:
-            out_str = f"{name},{MAX_DISTANCE}" + "\n"
-        else:
-            out_str = f"{name},{str(10 * bb_dist[name])}" + "\n"
-        outfile.write(out_str)
-        return
+        if bb_dist[name] < SMALL_MAX_DISTANCE:
+            out_str = f"{name},{str(INTRA_CALL_DIST_COEF * bb_dist[name])}" + "\n"
+            outfile.write(out_str)
+            return
 
     distance = -1
     for node in find_nodes(name):
@@ -42,7 +41,7 @@ def calculate_distance(name: str, bb_dist: dict, outfile):
                 for target in find_nodes(t_name):
                     try:
                         shortest = nx.dijkstra_path_length(graph, node, target)
-                        di += 1.0 / (1.0 + 10 * bb_d + shortest)
+                        di += 1.0 / (1.0 + INTRA_CALL_DIST_COEF * bb_d + shortest)
                         ii += 1
                     except nx.NetworkXNoPath:
                         distance = -2

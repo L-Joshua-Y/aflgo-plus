@@ -28,6 +28,10 @@ from pathlib import Path
 
 MAX_DISTANCE = float((1 << 31) - 1)
 SMALL_MAX_DISTANCE = float((1 << 31) - 3)
+UNSURE_DISTANCE = float(-1.0)
+
+INNER_CALL_DIST_DELTA = 2.0
+INTRA_CALL_DIST_COEF = 10.0
 
 
 class memoize:
@@ -73,4 +77,14 @@ def is_path_to_filepath(path):
         raise argparse.ArgumentTypeError(f"'{p}' doesn't exist")
     if not p.is_file():
         raise argparse.ArgumentTypeError(f"'{p}' is not a file")
+    return p
+
+
+def is_path_to_dir(path):
+    """Returns Path object when path is an existing directory"""
+    p = Path(path)
+    if not p.exists():
+        raise argparse.ArgumentTypeError(f"'{p}' doesn't exist")
+    if not p.is_dir():
+        raise argparse.ArgumentTypeError(f"'{p}' is not a directory")
     return p

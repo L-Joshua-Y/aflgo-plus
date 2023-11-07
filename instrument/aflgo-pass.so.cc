@@ -17,6 +17,8 @@
 #include "../afl-2.57b/config.h"
 #include "../afl-2.57b/debug.h"
 
+#include "info.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -362,7 +364,12 @@ bool AFLCoverage::runOnModule(Module &M)
         // std::size_t pos = line.find(",");
         std::size_t pos = line.find_last_of(",");
         std::string bb_name = line.substr(0, pos);
-        int bb_dis = (int)(100.0 * atof(line.substr(pos + 1, line.length()).c_str()));
+        double raw_dist = atof(line.substr(pos + 1, line.length()).c_str());
+        int bb_dis = 0;
+        if (raw_dist > SMALL_MAX_DISTANCE)
+          bb_dis = MAX_DISTANCE_INT;
+        else if (raw_dist != UNSURE_DISTANCE && raw_dist >= 0.0)
+          bb_dis = (int)(100 * raw_dist);
 
         bb_to_dis.emplace(bb_name, bb_dis);
         basic_blocks.push_back(bb_name);
@@ -386,7 +393,7 @@ bool AFLCoverage::runOnModule(Module &M)
   {
 
     if (is_aflgo || is_aflgo_preprocessing)
-      SAYF(cCYA "aflgo-llvm-pass (yeah!) " cBRI VERSION cRST " (%s mode)\n",
+      SAYF(cCYA "aflgo-plus-llvm-pass (yeah!) " cBRI VERSION cRST " (%s mode)\n",
            (is_aflgo_preprocessing ? "preprocessing" : "distance instrumentation"));
     else
       SAYF(cCYA "afl-llvm-pass " cBRI VERSION cRST " by <lszekeres@google.com>\n");
@@ -425,7 +432,7 @@ bool AFLCoverage::runOnModule(Module &M)
       FATAL("Bad value of AFLGO_INST_RATIO (must be between 1 and 100)");
   }
 
-  char *_aflgo_plus_proj_path_prefix = getenv("AFLGO_PLUS_PROJ_ROOT_PATH");
+  char *_aflgo_plus_proj_path_prefix = getenv(AFLGO_PLUS_PROJ_ENV);
   std::string _aflgo_plus_proj_path = "";
   if (_aflgo_plus_proj_path_prefix)
   {
@@ -439,15 +446,15 @@ bool AFLCoverage::runOnModule(Module &M)
   if (is_aflgo_preprocessing)
   {
 
-    std::ofstream bbtargets_new(OutDirectory + "/BBtargets-new.txt", std::ofstream::out | std::ofstream::app);
-    std::ofstream fcalledges(OutDirectory + "/FCallEdges.txt", std::ofstream::out | std::ofstream::app);
-    std::ofstream bbnames(OutDirectory + "/BBnames.txt", std::ofstream::out | std::ofstream::app);
-    std::ofstream bbcalls(OutDirectory + "/BBcalls.txt", std::ofstream::out | std::ofstream::app);
-    std::ofstream fnames(OutDirectory + "/Fnames.txt", std::ofstream::out | std::ofstream::app);
-    std::ofstream ftargets(OutDirectory + "/Ftargets.txt", std::ofstream::out | std::ofstream::app);
+    std::ofstream bbtargets_new(OutDirectory + "/" + AFLGO_BB_TARGETS_NEW_FILE, std::ofstream::out | std::ofstream::app);
+    std::ofstream fcalledges(OutDirectory + "/" + AFLGO_PLUS_FUNC_EDGES_FILE, std::ofstream::out | std::ofstream::app);
+    std::ofstream bbnames(OutDirectory + "/" + AFLGO_BB_NAMES_FILE, std::ofstream::out | std::ofstream::app);
+    std::ofstream bbcalls(OutDirectory + "/" + AFLGO_BB_CALLS_FILE, std::ofstream::out | std::ofstream::app);
+    std::ofstream fnames(OutDirectory + "/" + AFLGO_FUNC_NAMES_FILE, std::ofstream::out | std::ofstream::app);
+    std::ofstream ftargets(OutDirectory + "/" + AFLGO_FUNC_TARGETS_FILE, std::ofstream::out | std::ofstream::app);
 
     /* Create dot-files directory */
-    std::string dotfiles(OutDirectory + "/dot-files");
+    std::string dotfiles(OutDirectory + "/" + AFLGO_DOTFILES_DIR);
     if (sys::fs::create_directory(dotfiles))
     {
       FATAL("Could not create directory %s.", dotfiles.c_str());
@@ -728,7 +735,7 @@ bool AFLCoverage::runOnModule(Module &M)
             IRB.CreateStore(ConstantInt::get(Int32Ty, cur_loc >> 1), AFLPrevLoc);
         Store->setMetadata(M.getMDKindID("nosanitize"), MDNode::get(C, None));
 
-        if (distance >= 0)
+        if (distance >= 0 && distance < MAX_DISTANCE_INT)
         {
 
           ConstantInt *Distance =

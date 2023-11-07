@@ -2,6 +2,8 @@
  *
  */
 
+#include "../../instrument/info.h"
+
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -30,16 +32,6 @@
 #if defined(LLVM34) || defined(LLVM35) || defined(LLVM36)
 #define LLVM_OLD_DEBUG_API
 #endif
-
-#define AFLGO_PLUS_PROJ_ENV "AFLGO_PLUS_PROJ_ROOT_PATH"
-#define AFLGO_FUNC_NAMES_FILE "Fnames.txt"
-#define AFLGO_FUNC_TARGETS_FILE "Ftargets.txt"
-#define AFLGO_BB_NAMES_FILE "BBnames.txt"
-#define AFLGO_BB_CALLS_FILE "BBcalls.txt"
-#define AFLGO_BB_TARGETS_FILE "BBtargets.txt"
-#define AFLGO_BB_TARGETS_NEW_FILE "BBtargets-new.txt"
-#define AFLGO_CALLGRAPH_FILE "callgraph.dot"
-#define AFLGO_DOTFILES_DIR "dot-files"
 
 using namespace llvm;
 
